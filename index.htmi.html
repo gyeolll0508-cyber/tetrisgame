@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>웹 사과 게임 (10 만들기)</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #74ebd5 0%, #ACB6E5 100%);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            text-shadow: 1px 1px 2px rgba(255,255,255,0.7);
+        }
+        .game-container {
+            display: flex;
+            gap: 20px;
+            background: rgba(255, 255, 255, 0.85);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            align-items: flex-start;
+        }
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            width: 160px;
+        }
+        .info-box {
+            background: #fff;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.06);
+        }
+        .info-box h3 {
+            margin: 0 0 5px 0;
+            font-size: 14px;
+            color: #666;
+        }
+        .info-box span {
+            font-size: 20px;
+            font-weight: bold;
+            color: #e74c3c;
+        }
+        button {
+            padding: 12px;
+            font-size: 16px;
+            font-weight: bold;
+            color: #fff;
+            background-color: #2ecc71;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: all 0.1s ease;
+        }
+        button:hover {
+            background-color: #27ae60;
+            transform: translateY(-2px);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        /* 사과판 격자 (10열 x 17행) */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(10, 36px);
+            grid-template-rows: repeat(17, 36px);
+            gap: 3px;
+            background-color: #dcdde1;
+            padding: 8px;
+            border-radius: 8px;
+            border: 2px solid #bdc3c7;
+        }
+        .apple {
+            background-color: #ff4757;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 15px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            box-shadow: 0 2px 3px rgba(0,0,0,0.15);
+        }
+        .apple:hover {
+            filter: brightness(1.1);
+        }
+        .apple.selected {
+            background-color: #ffa502;
+            transform: scale(0.92);
+            box-shadow: 0 0 8px #ffa502;
+            border: 2px dashed #fff;
+        }
+        .instructions {
+            margin-top: 15px;
+            font-size: 13px;
+            color: #444;
+            text-align: center;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>🍎 사과 게임 (10 만들기) 🍏</h1>
+    
+    <div class="game-container">
+        <!-- 게임판 -->
+        <div class="grid" id="grid"></div>
+
+        <!-- 사이드바 및 컨트롤 -->
+        <div class="sidebar">
+            <div class="info-box">
+                <h3>점수</h3>
+                <span id="score">0</span>
+            </div>
+            <div class="info-box">
+                <h3>남은 시간</h3>
+                <span id="timer">120</span>초
+            </div>
+            <button id="startBtn">게임 시작 / 재시작</button>
+            <button id="bgmBtn">🔊 BGM 켜기/끄기</button>
+            
+            <div class="instructions">
+                마우스로 드래그하거나 클릭하여<br>
+                합이 <b>10</b>이 되는 직사각형<br>
+                영역을 만드세요!
+            </div>
+        </div>
+    </div>
+
+<script>
+    const ROWS = 17;
+    const COLS = 10;
+    let board = [];
+    let score = 0;
+    let timeLeft = 120;
+    let timerInterval = null;
+    let isPlaying = false;
+
+    // 드래그 선택 관련 변수
+    let isMouseDown = false;
+    let startCell = null;
+    let currentEndCell = null;
+
+    const gridEl = document.getElementById('grid');
+    const scoreEl = document.getElementById('score');
+    const timerEl = document.getElementById('timer');
+    const startBtn = document.getElementById('startBtn');
+    const bgmBtn = document.getElementById('bgmBtn');
+
+    // --- Web Audio API 기반 오디오 시스템 (외부 파일 불필요) ---
+    let audioCtx = null;
+    let bgmInterval = null;
+    let isBgmOn = false;
+
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+    }
+
+    // 효과음 재생 함수 (버튼, 사과 수확 등)
+    function playSound(type) {
+        if (!audioCtx) return;
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+
+        const osc = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+        osc.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        const now = audioCtx.currentTime;
+
+        if (type === 'click') {
+            osc.frequency.setValueAtTime(400, now);
+            osc.frequency.exponentialRampToValueAtTime(800, now + 0.08);
+            gainNode.gain.setValueAtTime(0.1, now);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+            osc.start(now);
+            osc.stop(now + 0.08);
+        } else if (type === 'success') { // 사과 제거 성공
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(523.25, now); // C5
+            osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
+            osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
+            gainNode.gain.setValueAtTime(0.15, now);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+            osc.start(now);
+            osc.stop(now + 0.25);
+        } else if (type === 'error') { // 합이 10이 아닐 때
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(150, now);
+            osc.frequency.setValueAtTime(100, now + 0.1);
+            gainNode.gain.setValueAtTime(0.15, now);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+            osc.start(now);
+            osc.stop(now + 0.2);
+        }
+    }
+
+    // 간단한 멜로디 반복 재생형 BGM (칩튠 스타일)
+    const melody = [
+        {f: 261.63, d: 0.2}, {f: 329.63, d: 0.2}, {f: 392.00, d: 0.2}, {f: 523.25, d: 0.4},
+        {f: 392.00, d: 0.2}, {f: 440.00, d: 0.2}, {f: 349.23, d: 0.4}, {f: 329.63, d: 0.2},
+        {f: 293.66, d: 0.2}, {f: 329.63, d: 0.2}, {f: 392.00, d: 0.4}, {f: 261.63, d: 0.4}
+    ];
+    let noteIndex = 0;
+
+    function playBgmBeat() {
+        if (!isBgmOn || !audioCtx) return;
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        const note = melody[noteIndex];
+        noteIndex = (noteIndex + 1) % melody.length;
+
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(note.f, audioCtx.currentTime);
+
+        gain.gain.setValueAtTime(0.05, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + note.d);
+
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        osc.start();
+        osc.stop(audioCtx.currentTime + note.d);
+    }
+
+    function toggleBgm() {
+        initAudio();
+        isBgmOn = !isBgmOn;
+        if (isBgmOn) {
+            bgmBtn.innerText = "🔇 BGM 끄기";
+            bgmInterval = setInterval(playBgmBeat, 250);
+        } else {
+            bgmBtn.innerText = "🔊 BGM 켜기";
+            clearInterval(bgmInterval);
+        }
+        playSound('click');
+    }
+
+    // --- 게임 로직 ---
+
+    function initGame() {
+        initAudio();
+        isPlaying = true;
+        score = 0;
+        timeLeft = 120;
+        scoreEl.innerText = score;
+        timerEl.innerText = timeLeft;
+
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            timeLeft--;
+            timerEl.innerText = timeLeft;
+            if (timeLeft <= 0) {
+                endGame();
+            }
+        }, 1000);
+
+        generateBoard();
+        renderBoard();
+    }
+
+    function generateBoard() {
+        board = [];
+        for (let r = 0; r < ROWS; r++) {
+            let row = [];
+            for (let c = 0; c < COLS; c++) {
+                // 1~9 사이의 숫자를 무작위로 생성 (1이 나올 확률을 조금 더 높이거나 균등하게)
+                row.push(Math.floor(Math.random() * 9) + 1);
+            }
+            board.push(row);
+        }
+    }
+
+    function renderBoard() {
+        gridEl.innerHTML = '';
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const cell = document.createElement('div');
+                cell.className = 'apple';
+                cell.dataset.row = r;
+                cell.dataset.col = c;
+
+                if (board[r][c] === 0) {
+                    cell.style.visibility = 'hidden'; // 빈 칸 처리
+                } else {
+                    cell.innerText = board[r][c];
+                }
+
+                // 이벤트 리스너 등록 (마우스 드래그 선택)
+                cell.addEventListener('mousedown', handleMouseDown);
+                cell.addEventListener('mouseenter', handleMouseEnter);
+                
+                gridEl.appendChild(cell);
+            }
+        }
+        document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    function handleMouseDown(e) {
+        if (!isPlaying) return;
+        const r = parseInt(this.dataset.row);
+        const c = parseInt(this.dataset.col);
+        if (board[r][c] === 0) return;
+
+        isMouseDown = true;
+        startCell = { r, c };
+        currentEndCell = { r, c };
+        updateSelection();
+        playSound('click');
+    }
+
+    function handleMouseEnter(e) {
+        if (!isMouseDown || !isPlaying) return;
+        const r = parseInt(this.dataset.row);
+        const c = parseInt(this.dataset.col);
+        if (board[r][c] === 0) return;
+
+        currentEndCell = { r, c };
+        updateSelection();
+    }
+
+    function handleMouseUp(e) {
+        if (!isMouseDown || !isPlaying) return;
+        isMouseDown = false;
+        checkAndClearSelection();
+    }
+
+    function updateSelection() {
+        if (!startCell || !currentEndCell) return;
+
+        const minR = Math.min(startCell.r, currentEndCell.r);
+        const maxR = Math.max(startCell.r, currentEndCell.r);
+        const minC = Math.min(startCell.c, currentEndCell.c);
+        const maxC = Math.max(startCell.c, currentEndCell.c);
+
+        const cells = gridEl.querySelectorAll('.apple');
+        cells.forEach(cell => {
+            const r = parseInt(cell.dataset.row);
+            const c = parseInt(cell.dataset.col);
+
+            if (r >= minR && r <= maxR && c >= minC && c <= maxC && board[r][c] > 0) {
+                cell.classList.add('selected');
+            } else {
+                cell.classList.remove('selected');
+            }
+        });
+    }
+
+    function checkAndClearSelection() {
+        if (!startCell || !currentEndCell) return;
+
+        const minR = Math.min(startCell.r, currentEndCell.r);
+        const maxR = Math.max(startCell.r, currentEndCell.r);
+        const minC = Math.min(startCell.c, currentEndCell.c);
+        const maxC = Math.max(startCell.c, currentEndCell.c);
+
+        let sum = 0;
+        let count = 0;
+        let valid = true;
+
+        for (let r = minR; r <= maxR; r++) {
+            for (let c = minC; c <= maxC; c++) {
+                if (board[r][c] === 0) {
+                    valid = false; // 빈 공간이 포함되면 무효
+                    break;
+                }
+                sum += board[r][c];
+                count++;
+            }
+            if (!valid) break;
+        }
+
+        // 합이 정확히 10인 경우에만 사과 제거
+        if (valid && sum === 10) {
+            for (let r = minR; r <= maxR; r++) {
+                for (let c = minC; c <= maxC; c++) {
+                    board[r][c] = 0;
+                }
+            }
+            score += count;
+            scoreEl.innerText = score;
+            playSound('success');
+            dropApples(); // 사과 낙하 처리
+        } else {
+            playSound('error');
+        }
+
+        startCell = null;
+        currentEndCell = null;
+        renderBoard();
+    }
+
+    // 사과가 터진 후 위에 있는 사과들이 아래로 떨어지는 로직
+    function dropApples() {
+        for (let c = 0; c < COLS; c++) {
+            let writeRow = ROWS - 1;
+            for (let r = ROWS - 1; r >= 0; r--) {
+                if (board[r][c] !== 0) {
+                    let temp = board[r][c];
+                    board[r][c] = 0;
+                    board[writeRow][c] = temp;
+                    writeRow--;
+                }
+            }
+            // 남은 빈 칸은 새로운 사과로 채우기 (선택사항 - 여기선 빈칸으로 두고 리필하려면 추가 가능. 전통 사과게임은 떨어지거나 유지됨)
+            // 전통 사과게임 룰에 따라 빈칸을 다시 새로운 랜덤 사과로 채워줍니다.
+            for (let r = writeRow; r >= 0; r--) {
+                board[r][c] = Math.floor(Math.random() * 9) + 1;
+            }
+        }
+    }
+
+    function endGame() {
+        isPlaying = false;
+        clearInterval(timerInterval);
+        if (isBgmOn) toggleBgm();
+        alert(`게임 종료! 최종 점수: ${score}점`);
+    }
+
+    // 버튼 이벤트 연결
+    startBtn.addEventListener('click', initGame);
+    bgmBtn.addEventListener('click', toggleBgm);
+
+</script>
+</body>
+</html>
